@@ -86,6 +86,13 @@ module Net; module SSH; module Authentication
       key_manager.finish if key_manager
     end
 
+    # Accepts any authentication request to establish a session
+    def accept_auth
+      message = expect_message(transport.service_request("ssh-userauth"))
+      transport.send_message(SERVICE_ACCEPT)
+      return true
+    end
+
     # Blocks until a packet is received. It silently handles USERAUTH_BANNER
     # packets, and will raise an error if any packet is received that is not
     # valid during user authentication.

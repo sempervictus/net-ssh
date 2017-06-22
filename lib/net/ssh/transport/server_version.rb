@@ -25,21 +25,29 @@ module Net; module SSH; module Transport
 
     # Instantiates a new ServerVersion and immediately (and synchronously)
     # negotiates the SSH protocol in effect, using the given socket.
-    def initialize(socket, logger)
+    def initialize(socket, logger, is_server = false)
       @header = ""
       @version = nil
       @logger = logger
+      @server_side = is_server
       negotiate!(socket)
     end
 
     private
 
-      # Negotiates the SSH protocol to use, via the given socket. If the server
+      # Negotiates the SSH protocol to use, via the given socket. If the other side
       # reports an incompatible SSH version (e.g., SSH1), this will raise an
       # exception.
       def negotiate!(socket)
         info { "negotiating protocol version" }
 
+        # Send our info first if we're a server
+        if @server_side
+          debug { "local is `#{PROTO_VERSION}'" }
+          socket.write "#{PROTO_VERSION}\r\n"
+          socket.flush
+        end
+        # Figure out the other side's version
         loop do
           @version = ""
           loop do
@@ -59,13 +67,18 @@ module Net; module SSH; module Transport
         @version.chomp!
         debug { "remote is `#{@version}'" }
 
+        # This doesnt look like something we want in Metasploit
         unless @version.match(/^SSH-(1\.99|2\.0)-/)
           raise Net::SSH::Exception, "incompatible SSH version `#{@version}'"
         end
 
-        debug { "local is `#{PROTO_VERSION}'" }
-        socket.write "#{PROTO_VERSION}\r\n"
-        socket.flush
-      end
+        # Send our info if we're the client
+        if !@server_side
+          debug { "local is `#{PROTO_VERSION}'" }
+          socket.write "#{PROTO_VERSION}\r\n"
+          socket.flush
+        end
+      end # End  negotiation
+
   end
 end; end; end

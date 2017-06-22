@@ -46,7 +46,7 @@ module Net; module SSH; module Transport
                          hmac-sha2-256 hmac-sha2-512 hmac-sha2-256-96
                          hmac-sha2-512-96 none),
       :compression => %w(none zlib@openssh.com zlib),
-      :language    => %w() 
+      :language    => %w()
     }
     if defined?(OpenSSL::PKey::EC)
       ALGORITHMS[:host_key] += %w(ecdsa-sha2-nistp256
@@ -115,9 +115,15 @@ module Net; module SSH; module Transport
       @logger = session.logger
       @options = options
       @algorithms = {}
+      @server_side = options[:is_server?] ? true : false
       @pending = @initialized = false
       @client_packet = @server_packet = nil
       prepare_preferred_algorithms!
+    end
+
+    # Toggle server behavior
+    def toggle_server
+      @server_side = !(@server_side)
     end
 
     # Request a rekey operation. This will return immediately, and does not
@@ -136,7 +142,9 @@ module Net; module SSH; module Transport
     # way, this will block until the key exchange completes.
     def accept_kexinit(packet)
       info { "got KEXINIT from server" }
+      # @server_data = @server_side?  parse_client_algorithm_packet(packet) : parse_server_algorithm_packet(packet)
       @server_data = parse_server_algorithm_packet(packet)
+      #@server_data.each {|k,v| puts "#{k}: #{v}"}
       @server_packet = @server_data[:raw]
       if !pending?
         send_kexinit
@@ -172,20 +180,21 @@ module Net; module SSH; module Transport
       @initialized
     end
 
-    private
+    # Sends a KEXINIT packet to the server. If a server KEXINIT has already
+    # been received, this will then invoke #proceed! to proceed with the key
+    # exchange, otherwise it returns immediately (but sets the object to the
+    # pending state).
+    def send_kexinit
+      info { "sending KEXINIT" }
+      @pending = true
+      packet = @server_side ? build_server_algorithm_packet : build_client_algorithm_packet
+      @client_packet = packet.to_s
+      session.send_message(packet)
+      # raise packet.to_s
+      proceed! if @server_packet
+    end
 
-      # Sends a KEXINIT packet to the server. If a server KEXINIT has already
-      # been received, this will then invoke #proceed! to proceed with the key
-      # exchange, otherwise it returns immediately (but sets the object to the
-      # pending state).
-      def send_kexinit
-        info { "sending KEXINIT" }
-        @pending = true
-        packet = build_client_algorithm_packet
-        @client_packet = packet.to_s
-        session.send_message(packet)
-        proceed! if @server_packet
-      end
+    private
 
       # After both client and server have sent their KEXINIT packets, this
       # will do the algorithm negotiation and key exchange. Once both finish,
@@ -269,6 +278,38 @@ module Net; module SSH; module Transport
       end
 
       # Given the #algorithms map of preferred algorithm types, this constructs
+      # a KEXINIT packet to send to the client. It does not actually send it,
+      # it simply builds the packet and returns it.
+      # THIS IS CURRENTLY IN TESTING
+      def build_server_algorithm_packet
+        kex                 = algorithms[:kex        ].join(",")
+        host_key            = algorithms[:host_key   ].join(",")
+        encryption_client   = algorithms[:encryption ].join(",")
+        encryption_server   = algorithms[:encryption ].join(",")
+        hmac_client         = algorithms[:hmac       ].join(",")
+        hmac_server         = algorithms[:hmac       ].join(",")
+        compression_client  = algorithms[:compression].join(",")
+        compression_server  = algorithms[:compression].join(",")
+        language_client     = algorithms[:language   ].join(",")
+        language_server     = algorithms[:language   ].join(",")
+        header              = [
+          "0x67,0xef,0xab,0x37",
+          "0x7c,0xe2,0x74,0xc6",
+          "0x90,0x86,0x43,0xc0",
+          "0x57,0xae,0x77,0xfa"
+          ].map {|x| x.to_i(16)}
+
+        Net::SSH::Buffer.from(:byte, KEXINIT,
+          #:long, [rand(0xFFFFFFFF), rand(0xFFFFFFFF), rand(0xFFFFFFFF), rand(0xFFFFFFFF)],
+          :long, header,
+          :string, [kex, host_key, encryption_client, encryption_server, hmac_client, hmac_server],
+          :string, [compression_client, compression_server, language_client, language_server],
+          # :string, [@kex, @host_key, @encryption_client, @encryption_server, @hmac_client, @hmac_server],
+          # :string, [@compression_client, @compression_server, @language_client],
+          :bool, false, :long, 0)
+      end
+
+      # Given the #algorithms map of preferred algorithm types, this constructs
       # a KEXINIT packet to send to the server. It does not actually send it,
       # it simply builds the packet and returns it.
       def build_client_algorithm_packet
@@ -302,12 +343,13 @@ module Net; module SSH; module Transport
         @language_client    = negotiate(:language_client) rescue ""
         @language_server    = negotiate(:language_server) rescue ""
 
-        debug do
-          "negotiated:\n" +
+        # debug do
+          str = "negotiated:\n" +
             [:kex, :host_key, :encryption_server, :encryption_client, :hmac_client, :hmac_server, :compression_client, :compression_server, :language_client, :language_server].map do |key|
               "* #{key}: #{instance_variable_get("@#{key}")}"
             end.join("\n")
-        end
+          puts str
+        # end
       end
 
       # Negotiates a single algorithm based on the preferences reported by the
@@ -345,13 +387,31 @@ module Net; module SSH; module Transport
       def exchange_keys
         debug { "exchanging keys" }
 
-        algorithm = Kex::MAP[kex].new(self, session,
-          :client_version_string => Net::SSH::Transport::ServerVersion::PROTO_VERSION,
-          :server_version_string => session.server_version.version,
-          :server_algorithm_packet => @server_packet,
-          :client_algorithm_packet => @client_packet,
-          :need_bytes => kex_byte_requirement,
-          :logger => logger)
+        if @server_side
+          algo_opts = {
+            :client_version_string => session.server_version.version,
+            :server_version_string => Net::SSH::Transport::ServerVersion::PROTO_VERSION,
+            :server_algorithm_packet => @client_packet,
+            :client_algorithm_packet => @server_packet,
+            :need_bytes => kex_byte_requirement,
+            :logger => @logger,
+            :is_server? => @server_side
+          }
+          algo_opts.each {|k,v| puts "#{k} #{v}"}
+          puts "Kex is #{kex}"
+          algorithm = Kex::MAP[kex].new( self, session, algo_opts )
+        else
+          algo_opts = {
+            :client_version_string => Net::SSH::Transport::ServerVersion::PROTO_VERSION,
+            :server_version_string => session.server_version.version,
+            :server_algorithm_packet => @server_packet,
+            :client_algorithm_packet => @client_packet,
+            :need_bytes => kex_byte_requirement,
+            :logger => @logger
+          }
+          algo_opts.each {|k,v| puts "#{k} #{v}"}
+          algorithm = Kex::MAP[kex].new( self, session, algo_opts )
+        end
         result = algorithm.exchange_keys
 
         secret   = result[:shared_secret].to_ssh

@@ -74,7 +74,7 @@ module Net; module SSH; module Transport
       @host_key_verifier = select_host_key_verifier(options[:paranoid])
 
 
-      @server_version = timeout(options[:timeout] || 0) { ServerVersion.new(socket, logger) }
+      @server_version = timeout(options[:timeout] || 0) { ServerVersion.new(socket, logger, options[:is_server?]) }
 
       @algorithms = Algorithms.new(self, options)
       wait { algorithms.initialized? }
