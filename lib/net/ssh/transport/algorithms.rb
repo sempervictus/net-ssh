@@ -114,9 +114,15 @@ module Net; module SSH; module Transport
       @logger = session.logger
       @options = options
       @algorithms = {}
+      @server_side = options[:is_server?] ? true : false
       @pending = @initialized = false
       @client_packet = @server_packet = nil
       prepare_preferred_algorithms!
+    end
+
+    # Toggle server behavior
+    def toggle_server
+      @server_side = !(@server_side)
     end
 
     # Start the algorithm negotation

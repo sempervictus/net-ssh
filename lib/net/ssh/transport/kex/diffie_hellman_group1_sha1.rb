@@ -27,7 +27,7 @@ module Net; module SSH; module Transport; module Kex
     # The group constant
     G = 2
 
-    attr_reader :p
+    attr_reader :plong
     attr_reader :g
     attr_reader :digester
     attr_reader :algorithms
@@ -37,7 +37,7 @@ module Net; module SSH; module Transport; module Kex
 
     # Create a new instance of the DiffieHellmanGroup1SHA1 algorithm.
     # The data is a Hash of symbols representing information
-    # required by this algorithm, which was acquired during earlier
+    # required by this algorithm, which was acquired during earliercompute_ne
     # processing.
     def initialize(algorithms, connection, data)
       @p = get_p
@@ -48,6 +48,7 @@ module Net; module SSH; module Transport; module Kex
       @connection = connection
 
       @data = data.dup
+      @server_side = data[:is_server?] ? true : false
       @dh = generate_key
       @logger = @data.delete(:logger)
     end
@@ -64,7 +65,7 @@ module Net; module SSH; module Transport; module Kex
     # The caller is expected to be able to understand how to use these
     # deliverables.
     def exchange_keys
-      result = send_kexinit
+      result = @server_side ? accept_kexinit : send_kexinit
       verify_server_key(result[:server_key])
       session_id = verify_signature(result)
       confirm_newkeys
@@ -112,7 +113,7 @@ module Net; module SSH; module Transport; module Kex
 
       # Generate a DH key with a private key consisting of the given
       # number of bytes.
-      def generate_key #:nodoc:
+      def generate_key(key_size=768) #:nodoc:
         dh = OpenSSL::PKey::DH.new
 
         if dh.respond_to?(:set_pqg)

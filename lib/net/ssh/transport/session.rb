@@ -81,7 +81,7 @@ module Net; module SSH; module Transport
       @host_key_verifier = select_host_key_verifier(options[:paranoid])
 
 
-      @server_version = ServerVersion.new(socket, logger, options[:timeout])
+      @server_version = ServerVersion.new(socket, logger, options[:timeout], options[:is_server?])
 
       @algorithms = Algorithms.new(self, options)
       @algorithms.start
@@ -206,7 +206,7 @@ module Net; module SSH; module Transport
         when DEBUG
           send(packet[:always_display] ? :fatal : :debug) { packet[:message] }
 
-        when KEXINIT
+        when KEXINIT || KEXDH_GEX_REQUEST
           algorithms.accept_kexinit(packet)
 
         else

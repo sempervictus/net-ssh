@@ -25,6 +25,8 @@ module Net; module SSH; module Transport
 
     KEXDH_INIT                = 30
     KEXDH_REPLY               = 31
+    MSG_IGNORE                = 32
+    KEXDH_GEX_REQUEST         = 34
 
     KEXECDH_INIT              = 30
     KEXECDH_REPLY             = 31
